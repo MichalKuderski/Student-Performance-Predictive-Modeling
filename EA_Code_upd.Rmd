@@ -1,0 +1,221 @@
+---
+title: "417FinalProject"
+author: "Ethan Meadows"
+date: "2025-04-16"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load_libraries, message=FALSE, warning=FALSE}
+#Libraries needed for these functions to run (VERY IMPORTANT)
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+library(tidyr)
+library(knitr)
+library(kableExtra)
+```
+
+```{r load_and_clean_data}
+cleaned.data <- function(file_path){
+  data <- read.csv(file_path, stringsAsFactors = FALSE)
+  
+  var_names <- c(
+    "Student Age", "Sex", "Graduated high-school type", "Scholarship type",
+    "Additional work", "Regular artistic/sports activity", "Has partner",
+    "Total salary", "Transportation", "Accommodation in Cyprus",
+    "Mother's education", "Father's education", "Number of siblings",
+    "Parental status", "Mother's occupation", "Father's occupation",
+    "Weekly study hours", "Reading non-scientific", "Reading scientific",
+    "Seminar attendance", "Project impact", "Class attendance",
+    "Midterm prep 1", "Midterm prep 2", "Note taking", "Listening",
+    "Discussion improves success", "Flip-classroom",
+    "Current GPA (/4.00)", "Expected GPA (/4.00)",
+    "Course.ID", "Grade"
+  )
+  
+  # Apply new column names
+  colnames(data) <- var_names
+  
+  # Identify duplicates based on STUDENT ID
+  dup_students <- data$STUDENT.ID[duplicated(data$STUDENT.ID) | duplicated(data$STUDENT.ID, fromLast = TRUE)]
+  
+  # Remove all instances of duplicate STUDENT IDs
+  cleaned_data <- data[!data$STUDENT.ID %in% dup_students, ]
+  
+  # Return the cleaned table
+  return(cleaned_data)
+}
+
+# Load and clean the data
+data_frame <- cleaned.data("dataset_code.csv")
+
+# Display the dataframe - try multiple methods to ensure output
+cat("First 6 rows of the dataset:\n")
+head(data_frame)
+
+# Also try with print for more reliability
+cat("\nFull dataset dimensions:", dim(data_frame)[1], "rows and", dim(data_frame)[2], "columns\n")
+
+# Alternative display method
+kable(head(data_frame, 10), caption = "First 10 rows of the dataset") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE, position = "center") %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#4472C4") %>%
+  scroll_box(width = "100%", height = "300px")
+```
+
+```{r summary_statistics}
+# Create readable summary table
+summary_stats <- data_frame %>%
+  select(-STUDENT.ID, -COURSE.ID, -GRADE) %>%
+  summarise(across(everything(), list(
+    Mean = ~round(mean(., na.rm = TRUE), 2),
+    SD = ~round(sd(., na.rm = TRUE), 2),
+    Min = ~min(., na.rm = TRUE),
+    Max = ~max(., na.rm = TRUE),
+    N = ~sum(!is.na(.))
+  ))) %>%
+  pivot_longer(everything(), names_to = "var_stat", values_to = "value") %>%
+  separate(var_stat, into = c("Variable", "Statistic"), sep = "_") %>%
+  pivot_wider(names_from = "Statistic", values_from = "value")
+
+# Format the table to be more readable
+kable(summary_stats, caption = "Descriptive Statistics", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE, position = "center") %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#4472C4")
+```
+
+```{r categorical_visualizations}
+# Course ID histogram (treating as categorical)
+ggplot(data_frame, aes(x = factor(COURSE.ID))) +
+  geom_bar(fill = "blue", color = "black") +
+  labs(title = "Course ID Frequency", x = "Course ID", y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 0))
+
+# Grade histogram (treating as categorical)
+ggplot(data_frame, aes(x = factor(GRADE))) +
+  geom_bar(fill = "green", color = "black") +
+  labs(title = "Grade Frequency", x = "Grade", y = "Count") +
+  theme_minimal()
+
+# Identify categorical variables
+categorical_vars <- c(
+  "Student Age", "Sex", "Graduated high-school type",
+  "Scholarship type", "Additional work", "Regular artistic/sports activity",
+  "Has partner", "Transportation", "Accommodation in Cyprus",
+  "Mother's education", "Father's education", "Parental status",
+  "Mother's occupation", "Father's occupation", "Project impact",
+  "Class attendance", "Midterm prep 1", "Midterm prep 2",
+  "Note taking", "Listening", "Discussion improves success", "Flip-classroom"
+)
+
+# Create proper visualizations based on variable type
+for (col in names(data_frame)[2:31]) {  # Skip student ID and include up to Expected GPA
+  if(col %in% categorical_vars) {
+    # For categorical variables, use bar charts
+    plot <- ggplot(data_frame, aes(x = factor(data_frame[[col]]))) +
+      geom_bar(fill = "steelblue") +
+      labs(title = paste("Distribution of", col), x = col, y = "Count") +
+      theme_minimal()
+    print(plot)
+  } else if(is.numeric(data_frame[[col]])) {
+    # For continuous or discrete numeric variables that are not categorical
+    # Check if the variable has few unique values (likely discrete)
+    if(length(unique(data_frame[[col]])) <= 10) {
+      # For discrete variables with few levels
+      plot <- ggplot(data_frame, aes(x = factor(data_frame[[col]]))) +
+        geom_bar(fill = "orange") +
+        labs(title = paste("Distribution of", col), x = col, y = "Count") +
+        theme_minimal()
+    } else {
+      # For continuous variables
+      plot <- ggplot(data_frame, aes(x = data_frame[[col]])) +
+        geom_histogram(fill = "orange", alpha = 0.7, bins = 15) +
+        labs(title = paste("Distribution of", col), x = col, y = "Count") +
+        theme_minimal()
+    }
+    print(plot)
+  }
+}
+```
+
+```{r correlation_analysis}
+# Define truly continuous variables
+continuous_vars <- c(
+  "Weekly study hours", "Number of siblings", "Total salary",
+  "Current GPA (/4.00)", "Expected GPA (/4.00)"
+)
+
+# Correlation matrix for continuous variables
+numeric_data <- data_frame %>% select(all_of(continuous_vars))
+cor_matrix <- cor(numeric_data, use = "pairwise.complete.obs")
+
+# Display correlation matrix
+corrplot(cor_matrix, method = "color", type = "upper",
+         tl.cex = 0.7, tl.col = "black", 
+         title = "Correlation Matrix of Continuous Variables",
+         mar = c(0, 0, 1, 0))
+```
+
+```{r boxplots_for_continuous}
+# Create boxplots only for truly continuous variables
+for (var in continuous_vars) {
+  plot <- ggplot(data_frame, aes(x = factor(COURSE.ID), y = data_frame[[var]])) +
+    geom_boxplot(fill = "purple", alpha = 0.7) +
+    labs(title = paste(var, "by Course ID"), x = "Course ID", y = var) +
+    theme_minimal()
+  print(plot)
+}
+```
+
+```{r scatter_plots}
+# Creating scatter plots for continuous variables
+if (length(continuous_vars) >= 2) {
+  combs <- combn(continuous_vars, 2, simplify = FALSE)
+  for (combo in combs) {
+    # Create the scatter plot
+    plot <- ggplot(data_frame, aes(x = .data[[combo[1]]], y = .data[[combo[2]]])) +
+      geom_point(color = "red", alpha = 0.5) +
+      geom_smooth(method = "lm", se = FALSE, color = "blue") +
+      labs(title = paste("Scatter Plot:", combo[1], "vs", combo[2]),
+           x = combo[1], y = combo[2]) +
+      theme_minimal()
+    
+    # Print the plot
+    print(plot)
+  }
+}
+```
+
+```{r grade_analysis}
+# Analyze relationship between selected variables and Grade
+important_vars <- c("Weekly study hours", "Current GPA (/4.00)", "Class attendance", "Note taking")
+
+for (var in important_vars) {
+  if (var %in% categorical_vars) {
+    # For categorical variables
+    plot <- ggplot(data_frame, aes(x = factor(data_frame[[var]]), y = GRADE)) +
+      geom_boxplot(fill = "lightblue") +
+      labs(title = paste("Grade by", var), x = var, y = "Grade") +
+      theme_minimal()
+  } else {
+    # For continuous variables
+    plot <- ggplot(data_frame, aes(x = data_frame[[var]], y = GRADE)) +
+      geom_point(alpha = 0.5) +
+      geom_smooth(method = "lm", se = FALSE) +
+      labs(title = paste("Grade vs", var), x = var, y = "Grade") +
+      theme_minimal()
+  }
+  print(plot)
+}
+```
+
+
+
